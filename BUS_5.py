@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-st.set_page_config(page_title="버스 전광판 테스트", page_icon="🚌")
+st.set_page_config(page_title="버스 출도착 전광판", page_icon="🚌")
 
 # [주의] 인증키를 꼭 확인하세요!
 SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1" 
@@ -50,3 +50,4 @@ for st_info in stations:
     else:
         st.write("📭 이 정류소는 현재 검색되는 버스가 없습니다.")
     st.divider()
+
