@@ -82,4 +82,5 @@ with col2:
     else: st.write("운행 종료")
 
 if st.button('🔄 정보 업데이트'):
-    st.rerun()999
+    st.rerun()
+
