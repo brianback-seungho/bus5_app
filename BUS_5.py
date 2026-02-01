@@ -22,20 +22,38 @@ def get_bus_data(bsId):
 def get_subway_table(station_code, up_down):
     url = f"https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php?station_code={station_code}&up_down={up_down}"
     try:
-        res = requests.get(url, timeout=5)
+        # 1. 데이터 가져오기 (verify=False는 SSL 보안 인증서 오류 방지용)
+        res = requests.get(url, timeout=5, verify=False)
+        res.encoding = 'utf-8' # 한글 깨짐 방지
+        
+        # 2. XML 해석
         root = ET.fromstring(res.text)
         
         times = []
-        for item in root.findall('.//item'):
-            h = item.find('stime_hh').text.zfill(2)
-            m = item.find('stime_mm').text.zfill(2)
-            times.append(f"{h}:{m}")
+        # 'item' 태그를 모두 찾아서 시간(hh)과 분(mm)을 합칩니다.
+        for item in root.iter('item'):
+            hh_node = item.find('stime_hh')
+            mm_node = item.find('stime_mm')
+            
+            if hh_node is not None and mm_node is not None:
+                h = hh_node.text.strip().zfill(2)
+                m = mm_node.text.strip().zfill(2)
+                times.append(f"{h}:{m}")
         
-        # 현재 시간 이후의 시간만 필터링
+        # 3. 현재 시간 이후 데이터 필터링
+        if not times:
+            return []
+            
         now = datetime.now().strftime("%H:%M")
-        next_trains = [t for t in sorted(times) if t >= now]
-        return next_trains[:5] # 다음 열차 5개만 반환
-    except:
+        # 중복 제거 및 정렬
+        next_trains = sorted(list(set(times)))
+        # 현재 시각 이후 열차만 골라내기
+        upcoming = [t for t in next_trains if t >= now]
+        
+        return upcoming[:5] # 다음 열차 5개
+    except Exception as e:
+        # 에러 확인용 (실제 배포시에는 주석 처리 가능)
+        # st.error(f"지하철 에러: {e}")
         return []
 
 # --- UI 시작 ---
@@ -83,4 +101,5 @@ with col2:
 
 if st.button('🔄 정보 업데이트'):
     st.rerun()
+
 
