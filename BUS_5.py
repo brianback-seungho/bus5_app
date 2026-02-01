@@ -1,15 +1,20 @@
 import streamlit as st
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 1. 페이지 설정
 st.set_page_config(page_title="동구5 & 지하철 안내판", page_icon="🚌")
 
-# 2. 인증키 (버스용)
+# 2. 인증키 (본인의 것으로 변경)
 SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1"
 
-# 3. 버스 데이터 함수
+# 3. 한국 시간 강제 설정 함수
+def get_now_korea():
+    # 서버 시간이 어디든 한국 시간(UTC+9)으로 계산
+    return datetime.utcnow() + timedelta(hours=9)
+
+# 4. 버스 데이터 함수
 def get_bus_data(bsId):
     url = "http://apis.data.go.kr/6270000/dbmsapi02/getRealtime02"
     params = {'serviceKey': requests.utils.unquote(SERVICE_KEY).strip(), 'bsId': bsId, 'numOfRows': '20', '_type': 'json'}
@@ -18,47 +23,36 @@ def get_bus_data(bsId):
         return res.json().get('body', {}).get('items', [])
     except: return []
 
-# 4. 지하철 시간표 가져와서 해석(Parsing)하는 함수
+# 5. 지하철 시간표 파싱 함수 (경로 보강)
 def get_subway_table(station_code, up_down):
     url = f"https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php?station_code={station_code}&up_down={up_down}"
     try:
-        # 1. 데이터 가져오기 (verify=False는 SSL 보안 인증서 오류 방지용)
         res = requests.get(url, timeout=5, verify=False)
-        res.encoding = 'utf-8' # 한글 깨짐 방지
-        
-        # 2. XML 해석
+        res.encoding = 'utf-8'
         root = ET.fromstring(res.text)
         
         times = []
-        # 'item' 태그를 모두 찾아서 시간(hh)과 분(mm)을 합칩니다.
-        for item in root.iter('item'):
-            hh_node = item.find('stime_hh')
-            mm_node = item.find('stime_mm')
-            
-            if hh_node is not None and mm_node is not None:
-                h = hh_node.text.strip().zfill(2)
-                m = mm_node.text.strip().zfill(2)
-                times.append(f"{h}:{m}")
+        # 모든 <item> 태그를 찾아서 내부의 시간 정보 추출
+        for item in root.findall('.//item'):
+            hh = item.findtext('stime_hh')
+            mm = item.findtext('stime_mm')
+            if hh and mm:
+                times.append(f"{hh.strip().zfill(2)}:{mm.strip().zfill(2)}")
         
-        # 3. 현재 시간 이후 데이터 필터링
-        if not times:
-            return []
+        if not times: return []
             
-        now = datetime.now().strftime("%H:%M")
-        # 중복 제거 및 정렬
-        next_trains = sorted(list(set(times)))
-        # 현재 시각 이후 열차만 골라내기
-        upcoming = [t for t in next_trains if t >= now]
+        # [중요] 한국 시간 기준으로 비교
+        now_str = get_now_korea().strftime("%H:%M")
+        upcoming = [t for t in sorted(list(set(times))) if t >= now_str]
         
-        return upcoming[:5] # 다음 열차 5개
-    except Exception as e:
-        # 에러 확인용 (실제 배포시에는 주석 처리 가능)
-        # st.error(f"지하철 에러: {e}")
+        return upcoming[:5]
+    except:
         return []
 
 # --- UI 시작 ---
 st.title("🚌 통합 교통 안내판")
-st.caption(f"현재 시각: {datetime.now().strftime('%H:%M:%S')}")
+# 현재 한국 시간 표시
+st.write(f"🇰🇷 현재 시각: **{get_now_korea().strftime('%H:%M:%S')}**")
 
 # [버스 섹션]
 st.header("🚏 실시간 버스 (동구5)")
@@ -86,20 +80,16 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("🚉 반야월 (상행)")
     st.caption("설화명곡 방면")
-    table = get_subway_table('144', '1') # 반야월 상행
-    if table:
-        st.table({"출발 시간": table})
-    else: st.write("운행 종료")
+    table = get_subway_table('144', '1')
+    if table: st.table({"출발 시각": table})
+    else: st.write("운행 정보 없음")
 
 with col2:
     st.subheader("🚉 동대구 (하행)")
     st.caption("안심 방면")
-    table = get_subway_table('135', '2') # 동대구 하행
-    if table:
-        st.table({"출발 시간": table})
-    else: st.write("운행 종료")
+    table = get_subway_table('135', '2')
+    if table: st.table({"출발 시각": table})
+    else: st.write("운행 정보 없음")
 
 if st.button('🔄 정보 업데이트'):
     st.rerun()
-
-
