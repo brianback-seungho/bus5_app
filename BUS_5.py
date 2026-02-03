@@ -26,27 +26,42 @@ def get_bus_data(bsId):
 # 5. 지하철 시간표 파싱 함수 (경로 보강)
 def get_subway_table(station_code, up_down):
     url = f"https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php?station_code={station_code}&up_down={up_down}"
+    
+    # 브라우저처럼 보이게 만드는 헤더
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
     try:
-        res = requests.get(url, timeout=5, verify=False)
+        # SSL 인증서 무시(verify=False) 및 헤더 추가
+        res = requests.get(url, headers=headers, timeout=10, verify=False)
         res.encoding = 'utf-8'
-        root = ET.fromstring(res.text)
         
+        # 만약 데이터가 너무 짧으면(에러 페이지 등) 빈 리스트 반환
+        if len(res.text) < 100:
+            return []
+            
+        root = ET.fromstring(res.text)
         times = []
-        # 모든 <item> 태그를 찾아서 내부의 시간 정보 추출
-        for item in root.findall('.//item'):
+        
+        # 'item' 태그를 더 공격적으로 찾음
+        for item in root.iter('item'):
             hh = item.findtext('stime_hh')
             mm = item.findtext('stime_mm')
             if hh and mm:
                 times.append(f"{hh.strip().zfill(2)}:{mm.strip().zfill(2)}")
         
-        if not times: return []
+        if not times:
+            return []
             
-        # [중요] 한국 시간 기준으로 비교
-        now_str = get_now_korea().strftime("%H:%M")
+        # 한국 시간 기준으로 필터링
+        now_str = (datetime.utcnow() + timedelta(hours=9)).strftime("%H:%M")
         upcoming = [t for t in sorted(list(set(times))) if t >= now_str]
         
         return upcoming[:5]
-    except:
+    except Exception as e:
+        # 디버깅용: 실제 화면에 에러가 살짝 찍히게 함 (나중에 지워도 됨)
+        # st.write(f"로그: {str(e)}")
         return []
 
 # --- UI 시작 ---
@@ -93,3 +108,4 @@ with col2:
 
 if st.button('🔄 정보 업데이트'):
     st.rerun()
+
