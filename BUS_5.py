@@ -18,6 +18,7 @@ def get_now_korea():
 
 # 대구교통공사 API 호출 함수
 import re  # 정규표현식 추가
+import re  # 정규표현식 추가
 
 def get_dtro_api_data(station_nm, direction):
     now, is_holiday = get_now_korea(), (get_now_korea() in holidays.KR())
@@ -114,6 +115,7 @@ for bs in [{'name': '📍 율하고가교1', 'id': '7011061400'}, {'name': '📍
 
 if st.button('🔄 새로고침'):
     st.rerun()
+
 
 
 
