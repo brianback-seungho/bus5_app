@@ -74,7 +74,7 @@ st.title("🚇 대구 실시간 교통 API")
 st.write(f"현재 시각: **{now_k.strftime('%Y-%m-%d %H:%M:%S')}**")
 
 # 지하철 섹션
-st.header("🚅 지하철 (DTRO API 실시간)")
+st.header("🚅 지하철 (DTRO API 실시간2)")
 col1, col2 = st.columns(2)
 
 with col1:
@@ -114,5 +114,6 @@ for bs in [{'name': '📍 율하고가교1', 'id': '7011061400'}, {'name': '📍
 
 if st.button('🔄 새로고침'):
     st.rerun()
+
 
 
