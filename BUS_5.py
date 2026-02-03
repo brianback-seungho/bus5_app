@@ -1,5 +1,10 @@
 # MY_SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1" 
 
+import streamlit as st
+import requests
+import holidays
+from datetime import datetime, timedelta
+
 # ---------------------------------------------------------
 # [필수] 본인의 공공데이터포털 인증키를 입력하세요
 MY_SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1" 
@@ -90,3 +95,4 @@ with col2:
 
 if st.button('🔄 새로고침'):
     st.rerun()
+
