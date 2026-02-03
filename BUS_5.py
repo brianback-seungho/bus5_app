@@ -19,9 +19,8 @@ def get_now_korea():
 # 대구교통공사 API 호출 함수
 def get_dtro_api_data(station_nm, direction):
     now, is_holiday = get_now_korea(), (get_now_korea() in holidays.KR())
-    weekday = now.weekday() # 0:월, 5:토, 6:일
+    weekday = now.weekday()
     
-    # 1. 요일에 따른 SCHEDULE_TYPE 결정
     if is_holiday or weekday == 6:
         s_type = "SUNDAY"
     elif weekday == 5:
@@ -29,30 +28,40 @@ def get_dtro_api_data(station_nm, direction):
     else:
         s_type = "WEEKDAY"
     
-    # 2. API URL 구성 (상행: UP, 하행: DOWN)
-    # direction: 'UP' (설화명곡 방면), 'DOWN' (안심 방면)
     url = f"https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php?STT_NM={station_nm}&LINE_NO=1&SCHEDULE_METH={direction}&SCHEDULE_TYPE={s_type}"
     
     try:
-        res = requests.get(url, timeout=10, verify=False)
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(url, headers=headers, timeout=10, verify=False)
         res.encoding = 'utf-8'
-        soup = BeautifulSoup(res.text, 'xml')
+        
+        # lxml-xml이 안될 경우를 대비해 html.parser를 보조로 사용
+        soup = BeautifulSoup(res.text, 'html.parser') 
         items = soup.find_all('item')
         
         now_str = now.strftime("%H:%M")
         upcoming = []
         
         for item in items:
-            hh = item.find('stime_hh').text.strip().zfill(2)
-            mm = item.find('stime_mm').text.strip().zfill(2)
-            time_val = f"{hh}:{mm}"
-            if time_val >= now_str:
-                upcoming.append(time_val)
+            # 태그가 대문자일 수도 소문자일 수도 있어 처리
+            hh_tag = item.find('stime_hh') or item.find('STIME_HH')
+            mm_tag = item.find('stime_mm') or item.find('STIME_MM')
+            
+            if hh_tag and mm_tag:
+                hh = hh_tag.text.strip().zfill(2)
+                mm = mm_tag.text.strip().zfill(2)
+                time_val = f"{hh}:{mm}"
+                
+                # '00:xx'로 시작하는 다음날 열차 처리 혹은 현재 시간 이후 필터링
+                if time_val >= now_str:
+                    upcoming.append(time_val)
         
-        return sorted(list(set(upcoming)))[:5], s_type
+        # 중복 제거 및 시간순 정렬
+        result = sorted(list(set(upcoming)))
+        return result[:5], s_type
     except Exception as e:
-        return [], f"에러: {e}"
-
+        return [], f"에러: {str(e)}"
+        
 # 버스 데이터 함수 (기존 유지)
 def get_bus_data(bsId):
     url = f"http://apis.data.go.kr/6270000/dbmsapi02/getRealtime02?serviceKey={MY_SERVICE_KEY}&bsId={bsId}&_type=json"
@@ -107,3 +116,4 @@ for bs in [{'name': '📍 율하고가교1', 'id': '7011061400'}, {'name': '📍
 
 if st.button('🔄 새로고침'):
     st.rerun()
+
