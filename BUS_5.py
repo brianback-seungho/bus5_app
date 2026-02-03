@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="동구5 & 지하철 안내판", page_icon="🚌")
+st.set_page_config(page_title="동구5 & 지하철 도착 시간", page_icon="🚌")
 
 # 인증키 (본인의 것으로 변경)
 SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1"
@@ -80,3 +80,4 @@ with col2:
 
 if st.button('🔄 새로고침'):
     st.rerun()
+
