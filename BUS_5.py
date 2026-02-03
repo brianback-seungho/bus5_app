@@ -2,31 +2,44 @@
 
 import streamlit as st
 import requests
+import holidays
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
-# [중요] 버스용 인증키는 본인 것을 입력하세요
-MY_SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1"
+# ---------------------------------------------------------
+# [필수] 본인의 공공데이터포털 버스 인증키를 입력하세요
+MY_SERVICE_KEY = "6fc222f7a07ce61876bf07b46533721a192b38b26b2ff8aff34d8bdc837f5ba1" 
+# ---------------------------------------------------------
 
-st.set_page_config(page_title="실시간 대구 교통", page_icon="🚇")
+st.set_page_config(page_title="대구 실시간 교통 안내", page_icon="🚇")
 
 def get_now_korea():
     return datetime.utcnow() + timedelta(hours=9)
 
-# --- 지하철 실시간 정보 (DTRO 서버 직접 조회) ---
-def get_subway_realtime(station_code, up_down):
-    # station_code: 144(반야월), 135(동대구) | up_down: 1(상행/설화명곡), 2(하행/안심)
-    url = f"https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php?station_code={station_code}&up_down={up_down}"
+# 대구교통공사 API 호출 함수
+def get_dtro_api_data(station_nm, direction):
+    now, is_holiday = get_now_korea(), (get_now_korea() in holidays.KR())
+    weekday = now.weekday() # 0:월, 5:토, 6:일
+    
+    # 1. 요일에 따른 SCHEDULE_TYPE 결정
+    if is_holiday or weekday == 6:
+        s_type = "SUNDAY"
+    elif weekday == 5:
+        s_type = "SATURDAY"
+    else:
+        s_type = "WEEKDAY"
+    
+    # 2. API URL 구성 (상행: UP, 하행: DOWN)
+    # direction: 'UP' (설화명곡 방면), 'DOWN' (안심 방면)
+    url = f"https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php?STT_NM={station_nm}&LINE_NO=1&SCHEDULE_METH={direction}&SCHEDULE_TYPE={s_type}"
+    
     try:
-        # SSL 인증서를 무시하고 브라우저인 척 접근합니다.
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(url, headers=headers, timeout=5, verify=False)
+        res = requests.get(url, timeout=10, verify=False)
         res.encoding = 'utf-8'
-        
         soup = BeautifulSoup(res.text, 'xml')
         items = soup.find_all('item')
         
-        now_str = get_now_korea().strftime("%H:%M")
+        now_str = now.strftime("%H:%M")
         upcoming = []
         
         for item in items:
@@ -36,60 +49,61 @@ def get_subway_realtime(station_code, up_down):
             if time_val >= now_str:
                 upcoming.append(time_val)
         
-        return sorted(list(set(upcoming)))[:4] # 다음 열차 4개
-    except:
-        return []
+        return sorted(list(set(upcoming)))[:5], s_type
+    except Exception as e:
+        return [], f"에러: {e}"
 
-# --- 버스 실시간 정보 ---
+# 버스 데이터 함수 (기존 유지)
 def get_bus_data(bsId):
     url = f"http://apis.data.go.kr/6270000/dbmsapi02/getRealtime02?serviceKey={MY_SERVICE_KEY}&bsId={bsId}&_type=json"
     try:
         res = requests.get(url, timeout=5)
-        return res.json().get('body', {}).get('items', [])
-    except:
-        return []
+        return res.json().get('body', {}).get('items', []) if res.status_code == 200 else []
+    except: return []
 
-# --- UI 화면 구성 ---
-st.title("🚇 실시간 동구 교통 안내")
-st.write(f"현재 시간: **{get_now_korea().strftime('%H:%M:%S')}**")
+# --- UI 레이아웃 ---
+now_k = get_now_korea()
+st.title("🚇 대구 실시간 교통 API")
+st.write(f"현재 시각: **{now_k.strftime('%Y-%m-%d %H:%M:%S')}**")
 
-# [지하철 섹션] - 전광판 데이터
-st.header("🚅 실시간 열차 (전광판 기준)")
+# 지하철 섹션
+st.header("🚅 지하철 (DTRO API 실시간)")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("🚉 반야월 (상행)")
+    st.success("🚉 반야월역 (상행)")
     st.caption("설화명곡 방면")
-    sub_ban = get_subway_realtime('144', '1')
-    if sub_ban:
-        for t in sub_ban:
-            st.info(f"**{t}** 출발 예정")
-    else: st.write("도착 정보 없음")
+    # 반야월역 상행은 UP
+    times, s_mode = get_dtro_api_data("반야월", "UP")
+    st.write(f"기준: `{s_mode}`")
+    if times:
+        for t in times: st.write(f"⏱️ **{t}** 출발")
+    else: st.info("운행 정보 없음")
 
 with col2:
-    st.subheader("🚉 동대구 (하행)")
+    st.success("🚉 동대구역 (하행)")
     st.caption("안심 방면")
-    sub_dong = get_subway_realtime('135', '2')
-    if sub_dong:
-        for t in sub_dong:
-            st.success(f"**{t}** 출발 예정")
-    else: st.write("도착 정보 없음")
+    # 동대구역 하행은 DOWN
+    times, s_mode = get_dtro_api_data("동대구", "DOWN")
+    st.write(f"기준: `{s_mode}`")
+    if times:
+        for t in times: st.write(f"⏱️ **{t}** 출발")
+    else: st.info("운행 정보 없음")
 
-# [버스 섹션]
 st.divider()
-st.header("🚌 실시간 버스 (동구5)")
-bus_list = [{'name': '📍 율하고가교1', 'id': '7011061400'}, {'name': '📍 항공교통본부앞', 'id': '7011060900'}]
 
-for bus in bus_list:
-    with st.expander(bus['name'], expanded=True):
-        data = get_bus_data(bus['id'])
-        if data:
-            for item in data:
+# 버스 섹션
+st.header("🚌 실시간 버스 (동구5)")
+for bs in [{'name': '📍 율하고가교1', 'id': '7011061400'}, {'name': '📍 항공교통본부앞', 'id': '7011060900'}]:
+    with st.expander(bs['name'], expanded=True):
+        items = get_bus_data(bs['id'])
+        if items:
+            for item in items:
                 if '동구5' in str(item.get('routeNo', '')):
                     for info in item.get('arrList', []):
                         st.metric("도착 정보", info.get('arrState'))
                         st.caption(f"현재 위치: {info.get('bsNm')}")
-        else: st.write("실시간 버스 없음")
+        else: st.write("실시간 정보 없음")
 
 if st.button('🔄 새로고침'):
     st.rerun()
