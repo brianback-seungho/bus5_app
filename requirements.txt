@@ -2,4 +2,3 @@ streamlit
 requests
 holidays
 beautifulsoup4
-xml
