@@ -40,7 +40,7 @@ def get_dtro_api_data(station_nm, direction):
     url = "https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php"
     
     try:
-        # 1. 보안 시그니처 획득 (1차 요청)
+        # 1. 시그니처 추출을 위한 사전 접속
         first_res = session.get(url, headers=headers, verify=False, timeout=5)
         sig_match = re.search(r"sabSignature=([^']+)'", first_res.text)
         
@@ -48,18 +48,28 @@ def get_dtro_api_data(station_nm, direction):
             session.cookies.set('sabFingerPrint', '1920,1080,www.dtro.or.kr', domain='www.dtro.or.kr')
             session.cookies.set('sabSignature', sig_match.group(1), domain='www.dtro.or.kr')
         
-        # 2. 실제 데이터 요청 (2차 요청)
+        # 2. 파라미터 최적화 (방향 값이 UP/DOWN으로 안 나올 경우 1/2로 자동 변환 시도)
+        # 반야월 상행(설화명곡)은 1 또는 UP, 하행(안심)은 2 또는 DOWN
+        meth_val = direction 
+        
         params = {
             'STT_NM': station_nm,
             'LINE_NO': '1',
-            'SCHEDULE_METH': direction, # UP 또는 DOWN
+            'SCHEDULE_METH': meth_val,
             'SCHEDULE_TYPE': s_type
         }
         
         res = session.get(url, params=params, headers=headers, verify=False, timeout=10)
         res.encoding = 'utf-8'
         
-        # 3. XML 파싱 및 시간 추출
+        # 데이터가 없을 경우 숫자로 재시도 (Fallback 로직)
+        if ("<SCHEDULE>-" in res.text or "apiDataList" not in res.text) and direction in ["UP", "DOWN"]:
+            params['SCHEDULE_METH'] = "1" if direction == "UP" else "2"
+            params['SCHEDULE_TYPE'] = "1" if s_type == "WEEKDAY" else ("2" if s_type == "SATURDAY" else "3")
+            res = session.get(url, params=params, headers=headers, verify=False, timeout=10)
+            res.encoding = 'utf-8'
+
+        # 3. 파싱
         if "apiDataList" in res.text:
             root = ET.fromstring(res.text)
             schedule_str = root.findtext('.//SCHEDULE')
@@ -67,18 +77,16 @@ def get_dtro_api_data(station_nm, direction):
             if not schedule_str or schedule_str == "-":
                 return [], s_type
             
-            # 정규표현식으로 시간(HH:MM)만 추출
+            # 모든 시간 형식 추출 (HH:MM:SS 또는 HH:MM)
             all_times = re.findall(r'(\d{1,2}:\d{2})', schedule_str)
             now_str = now.strftime("%H:%M")
             
-            # 현재 시간 이후 열차 필터링 및 중복 제거
-            upcoming = sorted([t for t in all_times if t >= now_str])
+            upcoming = sorted(list(set([t for t in all_times if t >= now_str])))
             return upcoming[:5], s_type
-        else:
-            return [], s_type
+        return [], s_type
             
     except Exception as e:
-        return [], f"에러: {str(e)}"
+        return [], f"Error: {str(e)}"
 
 # 버스 데이터 함수 (기존 유지)
 def get_bus_data(bsId):
@@ -146,6 +154,7 @@ for idx, bs in enumerate(bus_stops):
 
 if st.button('🔄 정보 새로고침'):
     st.rerun()
+
 
 
 
