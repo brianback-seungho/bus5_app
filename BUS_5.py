@@ -119,7 +119,7 @@ with col1:
 with col2:
     st.success("🚉 동대구역 (하행)")
     st.caption("안심 방면")
-    times, s_mode = get_dtro_api_data("동대구", "DOWN")
+    times, s_mode = get_dtro_api_data("동대구역", "DOWN")
     st.markdown(f"**요일 기준:** `{s_mode}`")
     if isinstance(times, list) and times:
         for t in times:
@@ -154,6 +154,7 @@ for idx, bs in enumerate(bus_stops):
 
 if st.button('🔄 정보 새로고침'):
     st.rerun()
+
 
 
 
