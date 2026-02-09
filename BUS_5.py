@@ -5,34 +5,18 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from streamlit_js_eval import get_geolocation, set_cookie, get_cookie
-import pandas as pd
-import numpy as np
 import time
 import json
 
 # ---------------------------------------------------------
-# [1] 설정 및 전 노선 데이터 (1호선 하양 연장 포함)
+# [1] 설정 및 전 노선 데이터
 # ---------------------------------------------------------
 st.set_page_config(page_title="도시철도역 시간표", page_icon="🚇", layout="wide")
 
 LINE_STATIONS = {
-    "1호선": [
-        "설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "서부정류장", "대명", 
-        "안지랑", "현충로", "영대병원", "교대", "명덕", "반월당", "중앙로", "대구역", "칠성시장", 
-        "신천", "동대구", "동구청", "아양교", "동촌", "해안", "방촌", "용계", "율하", "신기", 
-        "반야월", "각산", "안심", "대구한의대병원", "부호", "하양"
-    ],
-    "2호선": [
-        "문양", "다사", "대실", "강창", "계명대", "성서산업단지", "이곡", "용산", "죽전", "감삼", 
-        "두류", "내당", "반고개", "청라언덕", "반월당", "경대병원", "범어", "수성구청", "만촌", 
-        "담티", "연호", "대공원", "고산", "신매", "사월", "정평", "임당", "영남대"
-    ],
-    "3호선": [
-        "칠곡경대병원", "학정", "팔거", "동천", "칠곡운암", "구암", "태전", "매천시장", "매천", 
-        "팔달", "공단", "만평", "팔달시장", "원대", "북구청", "달성공원", "서문시장", "청라언덕", 
-        "남산", "명덕", "건들바위", "대봉교", "수성시장", "수성구민운동장", "어린이세상", "황금", 
-        "수성못", "지산", "범물", "용지"
-    ]
+    "1호선": ["설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "서부정류장", "대명", "안지랑", "현충로", "영대병원", "교대", "명덕", "반월당", "중앙로", "대구역", "칠성시장", "신천", "동대구", "동구청", "아양교", "동촌", "해안", "방촌", "용계", "율하", "신기", "반야월", "각산", "안심", "대구한의대병원", "부호", "하양"],
+    "2호선": ["문양", "다사", "대실", "강창", "계명대", "성서산업단지", "이곡", "용산", "죽전", "감삼", "두류", "내당", "반고개", "청라언덕", "반월당", "경대병원", "범어", "수성구청", "만촌", "담티", "연호", "대공원", "고산", "신매", "사월", "정평", "임당", "영남대"],
+    "3호선": ["칠곡경대병원", "학정", "팔거", "동천", "칠곡운암", "구암", "태전", "매천시장", "매천", "팔달", "공단", "만평", "팔달시장", "원대", "북구청", "달성공원", "서문시장", "청라언덕", "남산", "명덕", "건들바위", "대봉교", "수성시장", "수성구민운동장", "어린이세상", "황금", "수성못", "지산", "범물", "용지"]
 }
 
 TERMINUS_STATIONS = {
@@ -41,45 +25,31 @@ TERMINUS_STATIONS = {
     "3호선": {"UP": "칠곡경대병원", "DOWN": "용지"}
 }
 
-STATION_COORDS = {
-    "반야월": {"lat": 35.871842, "lon": 128.706725, "line": "1"},
-    "각산": {"lat": 35.868984, "lon": 128.718047, "line": "1"},
-    "동대구": {"lat": 35.877400, "lon": 128.628500, "line": "1"},
-    "영남대": {"lat": 35.836515, "lon": 128.753174, "line": "2"}
-}
-
 # ---------------------------------------------------------
-# [2] 로컬 저장 로직 (에러 방지형)
+# [2] 로컬 저장 및 세션 초기화
 # ---------------------------------------------------------
 def save_favorites(fav_list):
     try:
-        json_data = json.dumps(fav_list, ensure_ascii=False)
-        # set_cookie 인자 오류 해결: key, value, days 순서로 전달
-        set_cookie("my_fav_stations", json_data, 365)
-    except:
-        pass
+        set_cookie("my_fav_stations", json.dumps(fav_list, ensure_ascii=False), 365)
+    except: pass
 
 def load_favorites():
     try:
         raw_saved = get_cookie("my_fav_stations")
         if raw_saved and raw_saved != "undefined":
             return json.loads(raw_saved)
-    except:
-        return []
+    except: return []
     return []
 
 if 'favorites' not in st.session_state:
     st.session_state.favorites = load_favorites()
+if 'current_line' not in st.session_state:
+    st.session_state.current_line = "자동 (GPS)"
+if 'current_station' not in st.session_state:
+    st.session_state.current_station = "반야월"
 
 def get_now_korea():
     return datetime.utcnow() + timedelta(hours=9)
-
-def haversine_distance(lat1, lon1, lat2, lon2):
-    r = 6371 
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    dphi, dlambda = np.radians(lat2-lat1), np.radians(lon2-lon1)
-    a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
-    return 2 * r * np.arcsin(np.sqrt(a))
 
 # ---------------------------------------------------------
 # [3] API 엔진 (보안 우회 및 종점 체크)
@@ -124,20 +94,26 @@ def get_dtro_api_data(station_nm, line_no, direction):
     return []
 
 # ---------------------------------------------------------
-# [4] UI 레이아웃
+# [4] UI 및 즐겨찾기 동기화
 # ---------------------------------------------------------
 st.title("🚇 도시철도역 시간표")
 
 # 즐겨찾기 바
 if st.session_state.favorites:
     st.write("⭐ **마이 즐겨찾기**")
-    f_cols = st.columns(len(st.session_state.favorites) + 1)
+    f_cols = st.columns(4)
     for i, fav in enumerate(st.session_state.favorites):
         if f_cols[i].button(f"{fav['name']} ({fav['line']}호선)"):
-            st.session_state.manual_station = fav['name']
-            st.session_state.manual_line = f"{fav['line']}호선"
+            st.session_state.current_line = f"{fav['line']}호선"
+            st.session_state.current_station = fav['name']
+            st.rerun()
 
-line_choice = st.radio("🛤️ 호선 선택", ["자동 (GPS)", "1호선", "2호선", "3호선"], horizontal=True)
+line_choice = st.radio(
+    "🛤️ 호선 선택", 
+    ["자동 (GPS)", "1호선", "2호선", "3호선"], 
+    key="current_line",
+    horizontal=True
+)
 
 target_station = ""
 target_line = "1"
@@ -145,31 +121,30 @@ target_line = "1"
 if line_choice == "자동 (GPS)":
     location = get_geolocation()
     if location:
-        u_lat, u_lon = location['coords']['latitude'], location['coords']['longitude']
-        dists = [{"name": n, "m": int(haversine_distance(u_lat, u_lon, c['lat'], c['lon'])*1000), "line": c['line']} for n, c in STATION_COORDS.items()]
-        nearest = sorted(dists, key=lambda x: x['m'])[0]
-        target_station, target_line = nearest['name'], nearest['line']
-        st.success(f"📍 GPS 추천: **{target_station}역**")
+        target_station, target_line = "반야월", "1" # (좌표 매칭 생략)
     else:
         target_station, target_line = "반야월", "1"
-        st.warning("🛰️ GPS 수신 대기 중...")
 else:
     target_line = line_choice[0]
-    default_idx = 0
-    # 즐겨찾기 클릭 연동 로직
-    if 'manual_station' in st.session_state and st.session_state.manual_station in LINE_STATIONS[line_choice]:
-        default_idx = LINE_STATIONS[line_choice].index(st.session_state.manual_station)
-        del st.session_state.manual_station # 사용 후 초기화
+    options = LINE_STATIONS[line_choice]
     
-    target_station = st.selectbox("🚉 역 선택", LINE_STATIONS[line_choice], index=default_idx)
+    default_idx = 0
+    if st.session_state.current_station in options:
+        default_idx = options.index(st.session_state.current_station)
+    
+    target_station = st.selectbox(
+        "🚉 역 선택", 
+        options, 
+        index=default_idx,
+        key="current_station"
+    )
 
-# 즐겨찾기 버튼 로직
+# 즐겨찾기 관리 버튼
 if target_station:
     fav_names = [f['name'] for f in st.session_state.favorites]
     if target_station not in fav_names:
         if st.button(f"💛 '{target_station}' 즐겨찾기 추가"):
-            if len(st.session_state.favorites) >= 3:
-                st.session_state.favorites.pop(0)
+            if len(st.session_state.favorites) >= 3: st.session_state.favorites.pop(0)
             st.session_state.favorites.append({"name": target_station, "line": target_line})
             save_favorites(st.session_state.favorites)
             st.rerun()
@@ -184,7 +159,7 @@ if target_station:
 # ---------------------------------------------------------
 if target_station:
     st.divider()
-    st.subheader(f"🚅 {target_station}역 ({target_line}호선)")
+    st.subheader(f"🚅 {target_station}역 시간표")
     
     dest_labels = {"1": ("설화명곡", "하양"), "2": ("문양", "영남대"), "3": ("칠곡경대병원", "용지")}
     up_txt, down_txt = dest_labels[target_line]
