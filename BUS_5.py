@@ -10,28 +10,21 @@ import numpy as np
 import time
 
 # ---------------------------------------------------------
-# [1] 설정 및 전 노선 데이터 (1호선 하양 연장 포함)
+# [1] 설정 및 전 노선 데이터
 # ---------------------------------------------------------
 st.set_page_config(page_title="도시철도역 시간표", page_icon="🚇", layout="wide")
 
 LINE_STATIONS = {
-    "1호선": [
-        "설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "서부정류장", "대명", 
-        "안지랑", "현충로", "영대병원", "교대", "명덕", "반월당", "중앙로", "대구역", "칠성시장", 
-        "신천", "동대구", "동구청", "아양교", "동촌", "해안", "방촌", "용계", "율하", "신기", 
-        "반야월", "각산", "안심", "대구한의대병원", "부호", "하양"
-    ],
-    "2호선": [
-        "문양", "다사", "대실", "강창", "계명대", "성서산업단지", "이곡", "용산", "죽전", "감삼", 
-        "두류", "내당", "반고개", "청라언덕", "반월당", "경대병원", "범어", "수성구청", "만촌", 
-        "담티", "연호", "대공원", "고산", "신매", "사월", "정평", "임당", "영남대"
-    ],
-    "3호선": [
-        "칠곡경대병원", "학정", "팔거", "동천", "칠곡운암", "구암", "태전", "매천시장", "매천", 
-        "팔달", "공단", "만평", "팔달시장", "원대", "북구청", "달성공원", "서문시장", "청라언덕", 
-        "남산", "명덕", "건들바위", "대봉교", "수성시장", "수성구민운동장", "어린이세상", "황금", 
-        "수성못", "지산", "범물", "용지"
-    ]
+    "1호선": ["설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "서부정류장", "대명", "안지랑", "현충로", "영대병원", "교대", "명덕", "반월당", "중앙로", "대구역", "칠성시장", "신천", "동대구", "동구청", "아양교", "동촌", "해안", "방촌", "용계", "율하", "신기", "반야월", "각산", "안심", "대구한의대병원", "부호", "하양"],
+    "2호선": ["문양", "다사", "대실", "강창", "계명대", "성서산업단지", "이곡", "용산", "죽전", "감삼", "두류", "내당", "반고개", "청라언덕", "반월당", "경대병원", "범어", "수성구청", "만촌", "담티", "연호", "대공원", "고산", "신매", "사월", "정평", "임당", "영남대"],
+    "3호선": ["칠곡경대병원", "학정", "팔거", "동천", "칠곡운암", "구암", "태전", "매천시장", "매천", "팔달", "공단", "만평", "팔달시장", "원대", "북구청", "달성공원", "서문시장", "청라언덕", "남산", "명덕", "건들바위", "대봉교", "수성시장", "수성구민운동장", "어린이세상", "황금", "수성못", "지산", "범물", "용지"]
+}
+
+# 종점역 정의 (상행/하행 데이터 표시 제어용)
+TERMINUS_STATIONS = {
+    "1호선": {"UP": "설화명곡", "DOWN": "하양"},
+    "2호선": {"UP": "문양", "DOWN": "영남대"},
+    "3호선": {"UP": "칠곡경대병원", "DOWN": "용지"}
 }
 
 STATION_COORDS = {
@@ -53,9 +46,14 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return 2 * r * np.arcsin(np.sqrt(a))
 
 # ---------------------------------------------------------
-# [2] API 엔진 (안정적인 재시도 로직)
+# [2] API 엔진
 # ---------------------------------------------------------
 def get_dtro_api_data(station_nm, line_no, direction):
+    # 만약 현재 역이 해당 방향의 종점이라면 API를 호출하지 않고 "TERMINUS" 반환
+    line_key = f"{line_no}호선"
+    if TERMINUS_STATIONS[line_key][direction] == station_nm:
+        return "TERMINUS"
+
     now = get_now_korea()
     is_holiday = now in holidays.KR()
     weekday = now.weekday()
@@ -64,20 +62,17 @@ def get_dtro_api_data(station_nm, line_no, direction):
     url = "https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php"
     clean_nm = station_nm.replace("역", "")
     
-    for attempt in range(3):
+    for attempt in range(2): # 재시도 횟수 조정
         try:
             session = requests.Session()
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                'Referer': 'https://www.dtro.or.kr/'
-            }
+            headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)', 'Referer': 'https://www.dtro.or.kr/'}
             first = session.get(url, headers=headers, verify=False, timeout=5)
             sig = re.search(r"sabSignature=([^']+)'", first.text)
             if sig:
                 session.cookies.set('sabFingerPrint', '1920,1080,www.dtro.or.kr', domain='www.dtro.or.kr')
                 session.cookies.set('sabSignature', sig.group(1), domain='www.dtro.or.kr')
 
-            test_nm = clean_nm + "역" if attempt % 2 == 0 else clean_nm
+            test_nm = clean_nm + "역" if attempt == 0 else clean_nm
             params = {'STT_NM': test_nm, 'LINE_NO': line_no, 'SCHEDULE_METH': direction, 'SCHEDULE_TYPE': s_type}
             res = session.get(url, params=params, headers=headers, verify=False, timeout=8)
             res.encoding = 'utf-8'
@@ -90,22 +85,16 @@ def get_dtro_api_data(station_nm, line_no, direction):
                     now_str = now.strftime("%H:%M")
                     times = sorted(list(set([t for t in all_times if t >= now_str])))[:5]
                     if times: return times
-            time.sleep(0.5)
-        except:
-            continue
+            time.sleep(0.3)
+        except: continue
     return []
 
 # ---------------------------------------------------------
-# [3] UI 구성 (라디오 버튼 적용)
+# [3] UI 및 로직
 # ---------------------------------------------------------
 st.title("🚇 도시철도역 시간표")
 
-# 호선 선택을 라디오 버튼으로 변경 (가로 정렬 옵션 추가)
-line_choice = st.radio(
-    "🛤️ 호선을 선택하세요",
-    ["자동 (GPS)", "1호선", "2호선", "3호선"],
-    horizontal=True
-)
+line_choice = st.radio("🛤️ 호선을 선택하세요", ["자동 (GPS)", "1호선", "2호선", "3호선"], horizontal=True)
 
 location = get_geolocation()
 target_station = ""
@@ -120,14 +109,13 @@ if line_choice == "자동 (GPS)":
         st.success(f"📍 GPS 추천: **{target_station}역**")
     else:
         target_station, target_line = "반야월", "1"
-        st.warning("🛰️ GPS 수신 대기 중... (기본: 반야월역)")
+        st.warning("🛰️ GPS 수신 대기 중...")
 else:
-    # 역 선택은 드롭다운 유지 (역이 너무 많기 때문)
     target_station = st.selectbox("🚉 역 선택", LINE_STATIONS[line_choice])
     target_line = line_choice[0]
 
 # ---------------------------------------------------------
-# [4] 출력부
+# [4] 결과 출력 (종점 안내 로직 적용)
 # ---------------------------------------------------------
 if target_station:
     st.divider()
@@ -141,19 +129,24 @@ if target_station:
     up_txt, down_txt = dest_labels[target_line]
 
     c1, c2 = st.columns(2)
+    
     with c1:
         st.info(f"🔼 상행 ({up_txt})")
         up = get_dtro_api_data(target_station, target_line, "UP")
-        if up: 
+        if up == "TERMINUS":
+            st.warning("🏁 이곳은 상행 종점역입니다.")
+        elif up: 
             for t in up: st.write(f"⏱️ **{t}**")
         else: st.error("❌ 데이터 없음")
 
     with c2:
         st.info(f"🔽 하행 ({down_txt})")
         down = get_dtro_api_data(target_station, target_line, "DOWN")
-        if down: 
+        if down == "TERMINUS":
+            st.warning("🏁 이곳은 하행 종점역입니다.")
+        elif down: 
             for t in down: st.write(f"⏱️ **{t}**")
         else: st.error("❌ 데이터 없음")
 
 st.divider()
-if st.button('🔄 새로고침'): st.rerun()
+if st.button('🔄 정보 새로고침'): st.rerun()
