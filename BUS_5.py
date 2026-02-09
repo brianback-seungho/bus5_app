@@ -9,7 +9,7 @@ import time
 import json
 
 # ---------------------------------------------------------
-# [1] 설정 및 전 노선 데이터
+# [1] 설정 및 전 노선 데이터 (1호선 하양 연장 반영)
 # ---------------------------------------------------------
 st.set_page_config(page_title="도시철도역 시간표", page_icon="🚇", layout="wide")
 
@@ -26,7 +26,7 @@ TERMINUS_STATIONS = {
 }
 
 # ---------------------------------------------------------
-# [2] 로컬 저장 및 세션 초기화
+# [2] 로컬 저장 및 한국 시간 보정 로직
 # ---------------------------------------------------------
 def save_favorites(fav_list):
     try:
@@ -41,6 +41,11 @@ def load_favorites():
     except: return []
     return []
 
+def get_now_korea():
+    # 서버(UTC) 시간을 한국 시간(KST)으로 변환
+    return datetime.utcnow() + timedelta(hours=9)
+
+# 초기 세션 상태 설정
 if 'favorites' not in st.session_state:
     st.session_state.favorites = load_favorites()
 if 'current_line' not in st.session_state:
@@ -48,23 +53,30 @@ if 'current_line' not in st.session_state:
 if 'current_station' not in st.session_state:
     st.session_state.current_station = "반야월"
 
-def get_now_korea():
-    return datetime.utcnow() + timedelta(hours=9)
-
 # ---------------------------------------------------------
-# [3] API 엔진 (보안 우회 및 종점 체크)
+# [3] API 엔진 (시간/요일 구분 정밀화)
 # ---------------------------------------------------------
 def get_dtro_api_data(station_nm, line_no, direction):
     line_key = f"{line_no}호선"
     if TERMINUS_STATIONS[line_key][direction] == station_nm:
         return "TERMINUS"
 
+    now_kst = get_now_korea()
+    current_time_str = now_kst.strftime("%H:%M")
+    
+    # 요일/공휴일 판별
+    kr_holidays = holidays.KR(years=now_kst.year)
+    weekday = now_kst.weekday() # 0:월 ~ 6:일
+    
+    if now_kst.date() in kr_holidays or weekday == 6:
+        s_type = "HOLIDAY"
+    elif weekday == 5:
+        s_type = "SATURDAY"
+    else:
+        s_type = "WEEKDAY"
+    
     url = "https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php"
     clean_nm = station_nm.replace("역", "")
-    now = get_now_korea()
-    is_holiday = now in holidays.KR()
-    weekday = now.weekday()
-    s_type = "HOLIDAY" if (is_holiday or weekday == 6) else ("SATURDAY" if weekday == 5 else "WEEKDAY")
     
     for attempt in range(2):
         try:
@@ -86,9 +98,9 @@ def get_dtro_api_data(station_nm, line_no, direction):
                 schedule_str = root.findtext('.//SCHEDULE')
                 if schedule_str and schedule_str != "-":
                     all_times = re.findall(r'(\d{1,2}:\d{2})', schedule_str)
-                    now_str = now.strftime("%H:%M")
-                    times = sorted(list(set([t for t in all_times if t >= now_str])))[:5]
-                    if times: return times
+                    # 현재 시간 이후의 출발 시각만 필터링
+                    valid_times = sorted(list(set([t for t in all_times if t >= current_time_str])))
+                    return valid_times[:5]
             time.sleep(0.3)
         except: continue
     return []
@@ -97,17 +109,19 @@ def get_dtro_api_data(station_nm, line_no, direction):
 # [4] UI 및 즐겨찾기 동기화
 # ---------------------------------------------------------
 st.title("🚇 도시철도역 시간표")
+st.sidebar.info(f"🕒 KST: {get_now_korea().strftime('%H:%M:%S')}")
 
-# 즐겨찾기 바
+# 즐겨찾기 버튼 영역
 if st.session_state.favorites:
-    st.write("⭐ **마이 즐겨찾기**")
-    f_cols = st.columns(4)
+    st.write("⭐ **즐겨찾기 바로가기**")
+    f_cols = st.columns(len(st.session_state.favorites) + 1)
     for i, fav in enumerate(st.session_state.favorites):
         if f_cols[i].button(f"{fav['name']} ({fav['line']}호선)"):
             st.session_state.current_line = f"{fav['line']}호선"
             st.session_state.current_station = fav['name']
             st.rerun()
 
+# 호선 선택 (라디오 버튼)
 line_choice = st.radio(
     "🛤️ 호선 선택", 
     ["자동 (GPS)", "1호선", "2호선", "3호선"], 
@@ -121,16 +135,19 @@ target_line = "1"
 if line_choice == "자동 (GPS)":
     location = get_geolocation()
     if location:
-        target_station, target_line = "반야월", "1" # (좌표 매칭 생략)
+        # GPS 매칭 생략(반야월 예시)
+        target_station, target_line = "반야월", "1"
     else:
         target_station, target_line = "반야월", "1"
 else:
     target_line = line_choice[0]
     options = LINE_STATIONS[line_choice]
     
-    default_idx = 0
-    if st.session_state.current_station in options:
+    # 세션 상태에 따른 드롭다운 인덱스 결정
+    try:
         default_idx = options.index(st.session_state.current_station)
+    except:
+        default_idx = 0
     
     target_station = st.selectbox(
         "🚉 역 선택", 
@@ -139,7 +156,7 @@ else:
         key="current_station"
     )
 
-# 즐겨찾기 관리 버튼
+# 즐겨찾기 등록/해제 관리
 if target_station:
     fav_names = [f['name'] for f in st.session_state.favorites]
     if target_station not in fav_names:
@@ -155,31 +172,31 @@ if target_station:
             st.rerun()
 
 # ---------------------------------------------------------
-# [5] 결과 출력
+# [5] 결과 출력 영역
 # ---------------------------------------------------------
 if target_station:
     st.divider()
-    st.subheader(f"🚅 {target_station}역 시간표")
+    st.subheader(f"🚅 {target_station}역 ({target_line}호선) 도착 정보")
     
     dest_labels = {"1": ("설화명곡", "하양"), "2": ("문양", "영남대"), "3": ("칠곡경대병원", "용지")}
     up_txt, down_txt = dest_labels[target_line]
 
     c1, c2 = st.columns(2)
     with c1:
-        st.info(f"🔼 상행 ({up_txt})")
+        st.info(f"🔼 상행 ({up_txt} 방면)")
         up = get_dtro_api_data(target_station, target_line, "UP")
-        if up == "TERMINUS": st.warning("🏁 이곳은 상행 종점입니다.")
+        if up == "TERMINUS": st.warning("🏁 상행 종점입니다.")
         elif up: 
             for t in up: st.write(f"⏱️ **{t}** 출발")
-        else: st.error("❌ 데이터 없음")
+        else: st.error("❌ 운행 정보가 없습니다.")
 
     with c2:
-        st.info(f"🔽 하행 ({down_txt})")
+        st.info(f"🔽 하행 ({down_txt} 방면)")
         down = get_dtro_api_data(target_station, target_line, "DOWN")
-        if down == "TERMINUS": st.warning("🏁 이곳은 하행 종점입니다.")
+        if down == "TERMINUS": st.warning("🏁 하행 종점입니다.")
         elif down: 
             for t in down: st.write(f"⏱️ **{t}** 출발")
-        else: st.error("❌ 데이터 없음")
+        else: st.error("❌ 운행 정보가 없습니다.")
 
 st.divider()
-if st.button('🔄 새로고침'): st.rerun()
+if st.button('🔄 데이터 새로고침'): st.rerun()
