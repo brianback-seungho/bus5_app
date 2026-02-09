@@ -10,7 +10,7 @@ import numpy as np
 import time
 
 # ---------------------------------------------------------
-# [1] 설정 및 전 노선 데이터 (1호선 하양 연장선 포함)
+# [1] 설정 및 전 노선 데이터 (1호선 하양 연장 포함)
 # ---------------------------------------------------------
 st.set_page_config(page_title="도시철도역 시간표", page_icon="🚇", layout="wide")
 
@@ -19,7 +19,7 @@ LINE_STATIONS = {
         "설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "서부정류장", "대명", 
         "안지랑", "현충로", "영대병원", "교대", "명덕", "반월당", "중앙로", "대구역", "칠성시장", 
         "신천", "동대구", "동구청", "아양교", "동촌", "해안", "방촌", "용계", "율하", "신기", 
-        "반야월", "각산", "안심", "대구한의대병원", "부호", "하양"  # 하양 연장구간 추가
+        "반야월", "각산", "안심", "대구한의대병원", "부호", "하양"
     ],
     "2호선": [
         "문양", "다사", "대실", "강창", "계명대", "성서산업단지", "이곡", "용산", "죽전", "감삼", 
@@ -34,12 +34,10 @@ LINE_STATIONS = {
     ]
 }
 
-# GPS 거리 계산용 거점 (하양 방면 추가)
 STATION_COORDS = {
     "반야월": {"lat": 35.871842, "lon": 128.706725, "line": "1"},
     "각산": {"lat": 35.868984, "lon": 128.718047, "line": "1"},
     "안심": {"lat": 35.875322, "lon": 128.727402, "line": "1"},
-    "하양": {"lat": 35.911000, "lon": 128.818000, "line": "1"},
     "율하": {"lat": 35.867142, "lon": 128.682855, "line": "1"},
     "동대구": {"lat": 35.877400, "lon": 128.628500, "line": "1"}
 }
@@ -55,7 +53,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return 2 * r * np.arcsin(np.sqrt(a))
 
 # ---------------------------------------------------------
-# [2] API 엔진 (재시도 및 보안 우회)
+# [2] API 엔진 (안정적인 재시도 로직)
 # ---------------------------------------------------------
 def get_dtro_api_data(station_nm, line_no, direction):
     now = get_now_korea()
@@ -73,17 +71,14 @@ def get_dtro_api_data(station_nm, line_no, direction):
                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                 'Referer': 'https://www.dtro.or.kr/'
             }
-            
             first = session.get(url, headers=headers, verify=False, timeout=5)
             sig = re.search(r"sabSignature=([^']+)'", first.text)
-            
             if sig:
                 session.cookies.set('sabFingerPrint', '1920,1080,www.dtro.or.kr', domain='www.dtro.or.kr')
                 session.cookies.set('sabSignature', sig.group(1), domain='www.dtro.or.kr')
 
             test_nm = clean_nm + "역" if attempt % 2 == 0 else clean_nm
             params = {'STT_NM': test_nm, 'LINE_NO': line_no, 'SCHEDULE_METH': direction, 'SCHEDULE_TYPE': s_type}
-            
             res = session.get(url, params=params, headers=headers, verify=False, timeout=8)
             res.encoding = 'utf-8'
             
@@ -101,12 +96,16 @@ def get_dtro_api_data(station_nm, line_no, direction):
     return []
 
 # ---------------------------------------------------------
-# [3] UI 및 GPS 로직
+# [3] UI 구성 (라디오 버튼 적용)
 # ---------------------------------------------------------
 st.title("🚇 도시철도역 시간표")
-st.caption("대구 지하철 1·2·3호선 전 노선 안내 (1호선 하양 연장선 반영)")
 
-line_choice = st.selectbox("🛤️ 호선 선택", ["자동 (GPS)", "1호선", "2호선", "3호선"])
+# 호선 선택을 라디오 버튼으로 변경 (가로 정렬 옵션 추가)
+line_choice = st.radio(
+    "🛤️ 호선을 선택하세요",
+    ["자동 (GPS)", "1호선", "2호선", "3호선"],
+    horizontal=True
+)
 
 location = get_geolocation()
 target_station = ""
@@ -123,6 +122,7 @@ if line_choice == "자동 (GPS)":
         target_station, target_line = "반야월", "1"
         st.warning("🛰️ GPS 수신 대기 중... (기본: 반야월역)")
 else:
+    # 역 선택은 드롭다운 유지 (역이 너무 많기 때문)
     target_station = st.selectbox("🚉 역 선택", LINE_STATIONS[line_choice])
     target_line = line_choice[0]
 
@@ -133,9 +133,8 @@ if target_station:
     st.divider()
     st.subheader(f"🚅 {target_station}역 도착 정보")
     
-    # 하행 종점 명칭 업데이트
     dest_labels = {
-        "1": ("설화명곡 방면", "하양 방면"), # 안심에서 하양으로 변경
+        "1": ("설화명곡 방면", "하양 방면"),
         "2": ("문양 방면", "영남대 방면"),
         "3": ("칠곡경대병원 방면", "용지 방면")
     }
