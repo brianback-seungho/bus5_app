@@ -9,7 +9,7 @@ import time
 import json
 
 # ---------------------------------------------------------
-# [1] 설정 및 전 노선 데이터 (RainbowFarm 종목검색기 연계 가능)
+# [1] 설정 및 전 노선 데이터
 # ---------------------------------------------------------
 st.set_page_config(page_title="RainbowFarm 종목검색기 - 지하철", page_icon="🚇", layout="wide")
 
@@ -29,9 +29,7 @@ def get_now_korea():
     return datetime.utcnow() + timedelta(hours=9)
 
 def time_to_minutes(t_str):
-    """ 'HH:MM' 또는 'H:MM' 형식을 분 단위 정수로 변환하여 정확한 비교 보장 """
     try:
-        # 시간 문자열에서 숫자만 추출 (예: '08:05' -> 8, 5)
         h, m = map(int, t_str.split(':'))
         return h * 60 + m
     except:
@@ -103,9 +101,7 @@ def get_dtro_api_data(station_nm, line_no, direction):
                 root = ET.fromstring(res.text)
                 schedule_str = root.findtext('.//SCHEDULE')
                 if schedule_str and schedule_str != "-":
-                    # 중복 제거 및 시간순 정렬
                     all_times = sorted(list(set(re.findall(r'(\d{1,2}:\d{2})', schedule_str))), key=time_to_minutes)
-                    # 분 단위 비교로 현재 시간 이후만 필터링
                     valid_times = [t for t in all_times if time_to_minutes(t) >= current_min]
                     return valid_times[:5]
             time.sleep(0.3)
@@ -113,11 +109,10 @@ def get_dtro_api_data(station_nm, line_no, direction):
     return []
 
 # ---------------------------------------------------------
-# [4] UI 레이아웃 및 동기화
+# [4] UI 레이아웃
 # ---------------------------------------------------------
 st.title("🚇 도시철도역 시간표")
 
-# 즐겨찾기 바
 if st.session_state.favorites:
     st.write("⭐ **마이 즐겨찾기**")
     f_cols = st.columns(4)
@@ -127,25 +122,22 @@ if st.session_state.favorites:
             st.session_state.current_station = fav['name']
             st.rerun()
 
-# 호선 선택 (라디오 버튼)
 line_choice = st.radio("🛤️ 호선 선택", ["자동 (GPS)", "1호선", "2호선", "3호선"], key="current_line", horizontal=True)
 
 target_station = ""
 target_line = "1"
 
 if line_choice == "자동 (GPS)":
-    location = get_geolocation()
     target_station, target_line = "반야월", "1"
 else:
     target_line = line_choice[0]
     options = LINE_STATIONS[line_choice]
     try:
-        default_idx = options.index(st.session_state.current_station)
+        idx = options.index(st.session_state.current_station)
     except:
-        default_idx = 0
-    target_station = st.selectbox("🚉 역 선택", options, index=default_idx, key="current_station")
+        idx = 0
+    target_station = st.selectbox("🚉 역 선택", options, index=idx, key="current_station")
 
-# 즐겨찾기 추가/해제
 if target_station:
     fav_names = [f['name'] for f in st.session_state.favorites]
     if target_station not in fav_names:
@@ -161,25 +153,40 @@ if target_station:
             st.rerun()
 
 # ---------------------------------------------------------
-# [5] 결과 출력 (현재 시각 표기 포함)
+# [5] 결과 출력 (하행 소스코드 노출 버그 수정 완료)
 # ---------------------------------------------------------
 if target_station:
     now_label = get_now_korea().strftime("%H:%M")
     st.divider()
-    # 요청하신 대로 도착 정보 문구 옆에 현재 시각 표기
     st.subheader(f"🚅 {target_station}역 도착 정보 (현재 시각 {now_label})")
     
     dest_labels = {"1": ("설화명곡", "하양"), "2": ("문양", "영남대"), "3": ("칠곡경대병원", "용지")}
     up_txt, down_txt = dest_labels[target_line]
 
     c1, c2 = st.columns(2)
+    
     with c1:
         st.info(f"🔼 상행 ({up_txt} 방면)")
-        up = get_dtro_api_data(target_station, target_line, "UP")
-        if up == "TERMINUS": st.warning("🏁 상행 종점입니다.")
-        elif up: 
-            for t in up: st.write(f"⏱️ **{t}** 출발")
-        else: st.error("❌ 운행 종료 또는 정보 없음")
+        up_data = get_dtro_api_data(target_station, target_line, "UP")
+        if up_data == "TERMINUS":
+            st.warning("🏁 상행 종점입니다.")
+        elif up_data:
+            for t in up_data:
+                st.write(f"⏱️ **{t}** 출발")
+        else:
+            st.error("❌ 운행 정보 없음")
 
     with c2:
-        st
+        st.info(f"🔽 하행 ({down_txt} 방면)")
+        down_data = get_dtro_api_data(target_station, target_line, "DOWN")
+        if down_data == "TERMINUS":
+            st.warning("🏁 하행 종점입니다.")
+        elif down_data:
+            for t in down_data:
+                st.write(f"⏱️ **{t}** 출발")
+        else:
+            st.error("❌ 운행 정보 없음")
+
+st.divider()
+if st.button('🔄 데이터 새로고침'):
+    st.rerun()
