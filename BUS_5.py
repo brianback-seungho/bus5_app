@@ -9,19 +9,19 @@ import pandas as pd
 import numpy as np
 
 # ---------------------------------------------------------
-# [1] 설정 및 노선 순서 데이터
+# [1] 설정 및 데이터
 # ---------------------------------------------------------
 st.set_page_config(page_title="동구5번 교통 안내", page_icon="🚌", layout="wide")
 
-# 대구 1호선 노선 순서대로 정렬 (역 선택 메뉴용)
+# 대구 1호선 전체 역 리스트 (노선 순서)
 LINE_1_STATIONS = [
-    "설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "성당못", "대명", 
+    "설화명곡", "화원", "대곡", "진천", "월배", "상인", "월촌", "송현", "서부정류장", "대명", 
     "안지랑", "현충로", "영대병원", "교대", "명덕", "반월당", "중앙로", "대구역", 
     "칠성시장", "신천", "동대구", "동구청", "아양교", "동촌", "해안", "방촌", 
     "용계", "율하", "신기", "반야월", "각산", "안심"
 ]
 
-# 주요 역 정밀 좌표 (거리 계산용)
+# 주요 거점 좌표 (거리 계산용)
 STATION_COORDS = {
     "율하": {"lat": 35.867142, "lon": 128.682855},
     "신기": {"lat": 35.870025, "lon": 128.694625},
@@ -48,96 +48,98 @@ def get_dtro_api_data(station_nm, direction):
     s_type = "HOLIDAY" if (is_holiday or weekday == 6) else ("SATURDAY" if weekday == 5 else "WEEKDAY")
     
     session = requests.Session()
-    headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.dtro.or.kr/'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.dtro.or.kr/'
+    }
     url = "https://www.dtro.or.kr/open_content_new/ko/OpenApi/stationTime.php"
     
     try:
-        first = session.get(url, headers=headers, verify=False, timeout=5)
-        sig = re.search(r"sabSignature=([^']+)'", first.text)
-        if sig:
+        # 1. 시그니처 자동 추출
+        first_res = session.get(url, headers=headers, verify=False, timeout=5)
+        sig_match = re.search(r"sabSignature=([^']+)'", first_res.text)
+        if sig_match:
             session.cookies.set('sabFingerPrint', '1920,1080,www.dtro.or.kr', domain='www.dtro.or.kr')
-            session.cookies.set('sabSignature', sig.group(1), domain='www.dtro.or.kr')
+            session.cookies.set('sabSignature', sig_match.group(1), domain='www.dtro.or.kr')
 
-        # '역' 글자 처리 포함하여 요청
-        target_nm = station_nm if station_nm.endswith("역") else station_nm + "역"
-        params = {'STT_NM': target_nm, 'LINE_NO': '1', 'SCHEDULE_METH': direction, 'SCHEDULE_TYPE': s_type}
-        res = session.get(url, params=params, headers=headers, verify=False, timeout=10)
-        res.encoding = 'utf-8'
+        # 2. 역 이름 매칭 (반드시 '역'을 붙여서 시도)
+        clean_nm = station_nm.replace("역", "")
+        test_names = [clean_nm + "역", clean_nm]
         
-        if "apiDataList" in res.text:
-            root = ET.fromstring(res.text)
-            schedule_str = root.findtext('.//SCHEDULE')
-            if schedule_str and schedule_str != "-":
-                all_times = re.findall(r'(\d{1,2}:\d{2})', schedule_str)
-                now_str = now.strftime("%H:%M")
-                return sorted(list(set([t for t in all_times if t >= now_str])))[:5]
+        final_times = []
+        for name in test_names:
+            params = {
+                'STT_NM': name,
+                'LINE_NO': '1',
+                'SCHEDULE_METH': direction,
+                'SCHEDULE_TYPE': s_type
+            }
+            res = session.get(url, params=params, headers=headers, verify=False, timeout=10)
+            res.encoding = 'utf-8'
+            
+            if "apiDataList" in res.text:
+                root = ET.fromstring(res.text)
+                schedule_str = root.findtext('.//SCHEDULE')
+                if schedule_str and schedule_str != "-":
+                    all_times = re.findall(r'(\d{1,2}:\d{2})', schedule_str)
+                    now_str = now.strftime("%H:%M")
+                    # 중복 제거 및 현재 시간 이후 5개 추출
+                    final_times = sorted(list(set([t for t in all_times if t >= now_str])))[:5]
+                    if final_times: break # 데이터를 찾았으면 중단
+        return final_times
+    except Exception as e:
         return []
-    except: return []
 
 # ---------------------------------------------------------
-# [2] UI 레이아웃
+# [2] UI 구성
 # ---------------------------------------------------------
 st.title("🚌 동구5번 스마트 안내판")
 
-# 상단: 역 선택 메뉴 (기본값은 자동)
+# 상단 선택 메뉴
 selected_mode = st.selectbox(
-    "📍 정보를 확인하고 싶은 역을 선택하세요:",
+    "📍 정보를 확인할 역을 선택하세요:",
     ["자동 (GPS 추천)"] + LINE_1_STATIONS
 )
 
-st.divider()
-
-# 위치 정보 가져오기
+# GPS 수신
 location = get_geolocation()
 target_station = ""
 
 if selected_mode == "자동 (GPS 추천)":
     if location:
         u_lat, u_lon = location['coords']['latitude'], location['coords']['longitude']
-        
-        # 주요 역 중 가장 가까운 곳 찾기
-        dists = []
-        for name, coord in STATION_COORDS.items():
-            d = haversine_distance(u_lat, u_lon, coord['lat'], coord['lon'])
-            dists.append({"name": name, "m": int(d * 1000)})
-        
+        dists = [{"name": n, "m": int(haversine_distance(u_lat, u_lon, c['lat'], c['lon'])*1000)} for n, c in STATION_COORDS.items()]
         nearest = sorted(dists, key=lambda x: x['m'])[0]
         target_station = nearest['name']
-        st.success(f"🛰️ GPS 추천: 현재 **{target_station}역**({nearest['m']}m) 근처입니다.")
+        st.success(f"🛰️ GPS 기반 **{target_station}역** 추천 (거리: {nearest['m']}m)")
     else:
-        st.warning("🛰️ GPS 신호를 기다리는 중입니다... (신호가 약하면 아래 메뉴에서 역을 직접 선택하세요)")
+        st.warning("🛰️ GPS 수신 대기 중... 수동으로 역을 선택할 수 있습니다.")
         target_station = "반야월" # 기본값
 else:
     target_station = selected_mode
-    st.info(f"📍 사용자가 직접 **{target_station}역**을 선택했습니다.")
+    st.info(f"📍 직접 선택: **{target_station}역**")
 
 # ---------------------------------------------------------
-# [3] 시간표 표시부
+# [3] 시간표 출력 (성공했던 기존 방식 레이아웃)
 # ---------------------------------------------------------
 if target_station:
-    st.subheader(f"🚅 {target_station}역 실시간 도착 정보")
+    st.subheader(f"🚅 {target_station}역 실시간 시간표")
     col1, col2 = st.columns(2)
     
     with col1:
-        st.write("🔼 **상행 (설화명곡 방면)**")
-        times_up = get_dtro_api_data(target_station, "UP")
-        if times_up:
-            for t in times_up: st.write(f"⏱️ **{t}**")
-        else: st.write("운행 정보 없음")
+        st.markdown("### 🔼 상행 (설화명곡)")
+        up_times = get_dtro_api_data(target_station, "UP")
+        if up_times:
+            for t in up_times: st.write(f"⏱️ **{t}**")
+        else: st.error("운행 정보 없음")
 
     with col2:
-        st.write("🔽 **하행 (안심 방면)**")
-        times_down = get_dtro_api_data(target_station, "DOWN")
-        if times_down:
-            for t in times_down: st.write(f"⏱️ **{t}**")
-        else: st.write("운행 정보 없음")
+        st.markdown("### 🔽 하행 (안심)")
+        down_times = get_dtro_api_data(target_station, "DOWN")
+        if down_times:
+            for t in down_times: st.write(f"⏱️ **{t}**")
+        else: st.error("운행 정보 없음")
 
 st.divider()
-if st.button('🔄 새로고침'):
+if st.button('🔄 정보 새로고침'):
     st.rerun()
-
-# 하단 정보
-if location and selected_mode == "자동 (GPS 추천)":
-    with st.expander("🔍 내 GPS 좌표 및 거리 상세"):
-        st.write(f"좌표: `{u_lat}, {u_lon}`")
-        st.write("※ 실내에서는 GPS 오차(최대 1km 이상)가 발생할 수 있습니다.")
